@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Конвертер тестовых заданий → шаблон импорта</title>
+<style>
+  :root { --b:#1f6feb; --bg:#f6f8fa; --line:#d0d7de; --ok:#1a7f37; --warn:#9a6700; }
+  * { box-sizing:border-box; }
+  body { font-family:Segoe UI,Roboto,Arial,sans-serif; margin:0; background:var(--bg); color:#1f2328; }
+  header { background:#0b1f3a; color:#fff; padding:18px 24px; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:6px 0 0; opacity:.8; font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:20px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:18px; }
+  .card h2 { margin:0 0 12px; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .step { background:var(--b); color:#fff; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; }
+  label.lbl { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+  input[type=file], select, input[type=text] { font-size:14px; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fff; }
+  input[type=text] { width:100%; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:200px; }
+  button { font-size:15px; font-weight:600; padding:11px 20px; border:none; border-radius:8px; background:var(--b); color:#fff; cursor:pointer; }
+  button:disabled { background:#9fb8e0; cursor:not-allowed; }
+  button.secondary { background:#eaeef2; color:#1f2328; border:1px solid var(--line); font-size:13px; padding:7px 12px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th,td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#f0f3f6; }
+  .muted { color:#656d76; font-size:12.5px; }
+  .status { font-size:13px; padding:10px 12px; border-radius:7px; margin-top:8px; }
+  .status.ok { background:#e6f4ea; color:var(--ok); }
+  .status.err { background:#ffebe9; color:#cf222e; }
+  .status.info { background:#ddf4ff; color:#0969da; }
+  details { margin-top:6px; }
+  summary { cursor:pointer; font-weight:600; font-size:13px; color:var(--b); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
+  .pill { display:inline-block; background:#eef2f6; border:1px solid var(--line); border-radius:20px; padding:2px 10px; font-size:12px; }
+  code { background:#eef1f4; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .preview { max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:7px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Конвертер тестовых заданий</h1>
+  <p>Исходник (.docx) → шаблон импорта (.xlsx). Работает локально в браузере, ничего не отправляется в сеть.</p>
+</header>
+<main>
+
+  <div class="card">
+    <h2><span class="step">1</span> Исходный файл (.docx или .xlsx)</h2>
+    <input type="file" id="srcFile" accept=".docx,.xlsx">
+    <div id="srcStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span> Модель шаблона</h2>
+    <div class="row">
+      <div>
+        <label class="lbl">В какой шаблон переводим</label>
+        <select id="tplSelect">
+          <option value="gpn">ГПН Шаблон импорта (.xlsx)</option>
+          <option value="sibur">СИБУР Шаблон импорта (.xlsx)</option>
+          <option value="se_docx">SE Шаблон импорта (.docx)</option>
+          <option value="custom">Загрузить свой шаблон (.xlsx) — взять столбцы из шапки</option>
+        </select>
+      </div>
+      <div id="tplFileWrap" style="display:none">
+        <label class="lbl">Файл шаблона .xlsx</label>
+        <input type="file" id="tplFile" accept=".xlsx">
+      </div>
+    </div>
+    <div id="tplStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Дополнительно <span class="muted" style="font-weight:normal">— необязательно</span></h2>
+    <p class="muted">Соответствие столбцов и правила разбора настроены автоматически под выбранный шаблон. Открывайте этот раздел, только если исходник нестандартный и данные распознались неверно.</p>
+    <button class="secondary" id="toggleAdvanced">⚙ Настроить соответствие столбцов</button>
+    <div id="advancedPanel" style="display:none; margin-top:16px">
+    <p class="muted">Для каждого столбца шаблона выберите, какие данные из исходника туда переносить.</p>
+    <table id="mapTable"><thead><tr><th style="width:45%">Столбец шаблона</th><th>Данные из исходника</th></tr></thead><tbody></tbody></table>
+
+    <details>
+      <summary>Настройки разбора исходника</summary>
+      <div class="grid2" style="margin-top:12px">
+        <div><label class="lbl">Метка типа вопроса</label><input type="text" id="optLabelType" value="Тип:"></div>
+        <div><label class="lbl">Метки кода вопроса (через запятую)</label><input type="text" id="optLabelCode" value="Код задания:, Код:"></div>
+        <div><label class="lbl">Пропускать строки с метками (через запятую)</label><input type="text" id="optSkip" value="Статус:, Балл:"></div>
+        <div><label class="lbl">Метка пояснения (останавливает сбор ответов)</label><input type="text" id="optExpl" value="Пояснение:"></div>
+        <div><label class="lbl">Строки-разделители / мусор (рег. выражение)</label><input type="text" id="optSep" value="^Задание\s*#"></div>
+        <div><label class="lbl">Маркер темы → Секция 1</label><input type="text" id="optTheme" value="*"></div>
+        <div><label class="lbl">Маркер подтемы → Секция 2</label><input type="text" id="optSub" value="**"></div>
+        <div><label class="lbl">Символы правильного ответа</label><input type="text" id="optCorrect" value="+"></div>
+        <div><label class="lbl">Символы неправильного ответа</label><input type="text" id="optWrong" value="− – — -"></div>
+        <div>
+          <label class="lbl">Формат значений в «Ключи»</label>
+          <select id="optKeyFmt">
+            <option value="words">словами: правильный / неправильный</option>
+            <option value="symbols">символами: + / −</option>
+            <option value="binary">числом: 1 / 0</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px">
+          <label style="font-size:13px"><input type="checkbox" id="optLower" checked> Тип вопроса — в нижний регистр</label>
+          <label style="font-size:13px"><input type="checkbox" id="optNorm" checked> Нормализовать «множественный» → «множественный выбор»</label>
+        </div>
+      </div>
+      <button class="secondary" id="reparseBtn" style="margin-top:10px">Применить настройки и перечитать исходник</button>
+    </details>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span> Результат</h2>
+    <button id="convertBtn" disabled>Конвертировать и скачать .xlsx</button>
+    <div id="convStatus"></div>
+    <div id="previewWrap" style="margin-top:14px; display:none">
+      <div class="muted" style="margin-bottom:6px">Предпросмотр (первые строки):</div>
+      <div class="preview"><table id="previewTable"></table></div>
+    </div>
+  </div>
+
+  <p class="muted">Подсказка: если исходный документ открыт в Word, его всё равно можно загружать сюда — браузер читает копию.</p>
+</main>
+
+<script>
+"use strict";
+
+/* ====================== Шаблоны (модели) ====================== */
+const TEMPLATES = {
+  gpn: {
+    name: 'ГПН Шаблон импорта',
+    sheetName: 'Лист1',
+    columns: ['Тип вопроса','Код вопроса','Текст вопроса','Изображение в вопросе',
+              'Варианты ответов','Ключи','Изображения в ответах',
+              'Секция 1: код','Секция 1: название','Секция 2: код','Секция 2: название',
+              'Секция 3: код','Секция 3: название'],
+    // индекс столбца -> поле источника
+    defaults: {0:'type',1:'code',2:'text',4:'answers',5:'keys',8:'theme',10:'subtheme',12:'subtheme2'}
+  },
+  sibur: {
+    name: 'СИБУР Шаблон импорта',
+    sheetName: 'Тест',
+    columns: ['Предприятие','Оргединица','Код вопроса','Тип вопроса','Вопрос',
+              'Правильный ответ','Неправильный ответ 1','Неправильный ответ 2','Неправильный ответ 3',
+              'Направление','Компетенция','Код компетенции','Изображение в вопросе'],
+    // «широкая» раскладка: один вопрос — одна строка, ответы по столбцам
+    defaults: {2:'code',3:'type',4:'text',5:'correct',6:'wrong1',7:'wrong2',8:'wrong3'}
+  },
+  se_docx: {
+    name: 'SE Шаблон импорта (.docx)',
+    kind: 'docx',                 // выгрузка в Word в формате SE
+    columns: [],
+    defaults: {}
+  }
+};
+
+const SOURCE_FIELDS = [
+  {id:'',        label:'— не заполнять —'},
+  {id:'type',    label:'Тип вопроса'},
+  {id:'code',    label:'Код вопроса'},
+  {id:'text',    label:'Текст вопроса'},
+  {id:'answers', label:'Варианты ответов (по строкам)'},
+  {id:'keys',    label:'Ключи (правильный/неправильный)'},
+  {id:'correct', label:'Правильный ответ (1-й «+»)'},
+  {id:'wrong1',  label:'Неправильный ответ 1'},
+  {id:'wrong2',  label:'Неправильный ответ 2'},
+  {id:'wrong3',  label:'Неправильный ответ 3'},
+  {id:'wrong4',  label:'Неправильный ответ 4'},
+  {id:'theme',   label:'Тема (заголовок «*»)'},
+  {id:'subtheme',label:'Подтема (заголовок «**»)'},
+  {id:'subtheme2',label:'Под-подтема (заголовок «***»)'}
+];
+
+/* ====================== Состояние ====================== */
+let state = {
+  srcBytes: null,      // Uint8Array исходного файла
+  srcType: 'docx',     // docx | xlsx
+  srcKind: 'text',     // text (Word/SE) | table (Excel-таблица)
+  srcColumns: null,    // заголовки столбцов источника-таблицы
+  srcGrid: null,       // прочитанная сетка источника-таблицы
+  srcMap: {},          // карта импорта: роль -> индекс столбца источника
+  srcMapValid: false,  // карта актуальна для текущего файла
+  questions: null,     // разобранные вопросы
+  columns: TEMPLATES.gpn.columns.slice(),
+  mapping: {},         // colIndex -> fieldId (вывод в xlsx-шаблон)
+  tplKind: 'xlsx',
+  tplName: 'ГПН Шаблон импорта'
+};
+
+/* ====================== Утилиты DOM ====================== */
+const $ = id => document.getElementById(id);
+function setStatus(el, type, html){ el.innerHTML = `<div class="status ${type}">${html}</div>`; }
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// срезает ведущий знак ответа (+ − – — -), если текст уже им помечен — чтобы не задвоить маркер.
+// Не трогает числа вида «+5», «-10» (после знака цифра).
+const ANSWER_MARKERS = new Set(['+','−','–','—','-']);
+function stripLeadingMarker(s){
+  s = (s==null?'':String(s)).trim();
+  if (s && ANSWER_MARKERS.has(s[0])){
+    const next = s[1];
+    if (next === undefined || /\D/.test(next)) s = s.slice(1).replace(/^\s+/,'');
+  }
+  return s.trim();
+}
+// литеральный «<br>» / «<br/>» / «<br />» в тексте -> перенос строки
+function normalizeBr(s){ return (s==null?'':String(s)).replace(/<br\s*\/?>/gi, '\n'); }
+
+/* ====================== CRC32 ====================== */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1)?(0xEDB88320 ^ (c>>>1)):(c>>>1); t[n]=c>>>0; }
+  return t;
+})();
+function crc32(bytes){
+  let c = 0xFFFFFFFF;
+  for (let i=0;i<bytes.length;i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* ====================== Чтение ZIP (для .docx / .xlsx) ====================== */
+function findEOCD(b){
+  for (let i=b.length-22; i>=Math.max(0,b.length-65557); i--){
+    if (b[i]===0x50&&b[i+1]===0x4b&&b[i+2]===0x05&&b[i+3]===0x06) return i;
+  }
+  return -1;
+}
+function listZipEntries(b){
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const eocd = findEOCD(b);
+  if (eocd<0) throw new Error('Файл не является корректным архивом (zip/docx/xlsx).');
+  const count = dv.getUint16(eocd+10, true);
+  let off = dv.getUint32(eocd+16, true);
+  const entries = [];
+  const dec = new TextDecoder('utf-8');
+  for (let i=0;i<count;i++){
+    if (dv.getUint32(off,true)!==0x02014b50) break;
+    const method   = dv.getUint16(off+10,true);
+    const compSize = dv.getUint32(off+20,true);
+    const nameLen  = dv.getUint16(off+28,true);
+    const extraLen = dv.getUint16(off+30,true);
+    const cmtLen   = dv.getUint16(off+32,true);
+    const localOff = dv.getUint32(off+42,true);
+    const name = dec.decode(b.subarray(off+46, off+46+nameLen));
+    entries.push({name, method, compSize, localOff});
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return entries;
+}
+async function readZipEntry(b, name){
+  const entries = listZipEntries(b);
+  const e = entries.find(x => x.name===name);
+  if (!e) throw new Error('В архиве не найден '+name);
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const nameLen  = dv.getUint16(e.localOff+26, true);
+  const extraLen = dv.getUint16(e.localOff+28, true);
+  const start = e.localOff + 30 + nameLen + extraLen;
+  const comp = b.subarray(start, start + e.compSize);
+  if (e.method===0) return comp.slice();
+  if (e.method===8){
+    const ds = new DecompressionStream('deflate-raw');
+    const ab = await new Response(new Blob([comp]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint8Array(ab);
+  }
+  throw new Error('Неподдерживаемый метод сжатия в архиве: '+e.method);
+}
+
+/* ====================== Запись ZIP (метод "stored") ====================== */
+function makeZip(files){ // files: [{name, data:Uint8Array}]
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files){
+    const nameBytes = enc.encode(f.name);
+    const crc = crc32(f.data), size = f.data.length;
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true); dv.setUint16(4,20,true); dv.setUint16(6,0,true);
+    dv.setUint16(8,0,true); dv.setUint16(10,0,true); dv.setUint16(12,0x21,true);
+    dv.setUint32(14,crc,true); dv.setUint32(18,size,true); dv.setUint32(22,size,true);
+    dv.setUint16(26,nameBytes.length,true); dv.setUint16(28,0,true);
+    lh.set(nameBytes,30);
+    parts.push(lh, f.data);
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true);
+    cv.setUint16(8,0,true); cv.setUint16(10,0,true); cv.setUint16(12,0,true); cv.setUint16(14,0x21,true);
+    cv.setUint32(16,crc,true); cv.setUint32(20,size,true); cv.setUint32(24,size,true);
+    cv.setUint16(28,nameBytes.length,true);
+    cv.setUint32(42,offset,true);
+    ch.set(nameBytes,46);
+    central.push(ch);
+    offset += lh.length + size;
+  }
+  const centralStart = offset;
+  let centralSize = 0; for (const c of central) centralSize += c.length;
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0,0x06054b50,true);
+  ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
+  ev.setUint32(12,centralSize,true); ev.setUint32(16,centralStart,true);
+  return new Blob([...parts, ...central, eocd],
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+/* ====================== Разбор .docx ====================== */
+function decodeXmlText(s){
+  return s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+          .replace(/&apos;/g,"'").replace(/&#10;/g,'\n').replace(/&#x?\d+;/g,'')
+          .replace(/&amp;/g,'&');
+}
+function extractParagraphs(xml){
+  const lines = [];
+  for (const chunk of xml.split('</w:p>')){
+    let buf = '';
+    // в порядке следования собираем текст <w:t>, а переносы <w:br/> / <w:cr/> -> \n, <w:tab/> -> \t
+    const re = /<w:t[^>]*>([\s\S]*?)<\/w:t>|<w:br\b[^>]*>|<w:cr\b[^>]*>|<w:tab\b[^>]*>/g;
+    let m;
+    while ((m = re.exec(chunk))){
+      if (m[1] !== undefined) buf += decodeXmlText(m[1]);
+      else if (/<w:tab/.test(m[0])) buf += '\t';
+      else buf += '\n';
+    }
+    // абзац с переносами строк (<w:br/>) — это несколько логических строк
+    for (const part of buf.split('\n')) lines.push(part);
+  }
+  return lines;
+}
+function getOpts(){
+  const split = s => s.split(/[,\s]+/).map(x=>x.trim()).filter(Boolean);
+  let sepRe = null;
+  const sepStr = $('optSep').value.trim();
+  if (sepStr){ try { sepRe = new RegExp(sepStr, 'i'); } catch(e){ sepRe = null; } }
+  return {
+    labelType: $('optLabelType').value.trim(),
+    codeLabels: $('optLabelCode').value.split(',').map(x=>x.trim()).filter(Boolean),
+    skip: $('optSkip').value.split(',').map(x=>x.trim()).filter(Boolean),
+    expl: $('optExpl').value.trim(),
+    theme: $('optTheme').value.trim(),
+    sub: $('optSub').value.trim(),
+    correct: split($('optCorrect').value),
+    wrong: split($('optWrong').value),
+    sepRe: sepRe,
+    keyFmt: $('optKeyFmt').value,
+    lower: $('optLower').checked,
+    norm: $('optNorm').checked
+  };
+}
+function cleanHeading(line){
+  return line.replace(/^[*\s]+/,'').replace(/\s*\[[^\]]*\]/g,'').trim();
+}
+function parseQuestions(paragraphs, o){
+  const out = [];
+  let cur = null, mode = 'none', theme = '', sub = '', sub2 = '', sawBlank = false;
+  const startsAny = (line, arr) => arr.some(p => p && line.startsWith(p));
+  const newQ = () => ({ type:'', code:'', textLines:[], answers:[], theme, sub, sub2 });
+  // вопрос сохраняем, только если у него есть ответы или явно указан тип
+  // (так отбрасываются заголовок документа и прочий текст без ответов)
+  const flush = () => { if (cur && (cur.answers.length>0 || cur.type!=='')) out.push(cur); cur = null; };
+
+  for (const raw of paragraphs){
+    const line = raw.trim();
+    if (!line){ sawBlank = true; continue; }   // пустая строка — граница между вопросами
+
+    // «Тип:» всегда начинает новый вопрос
+    if (o.labelType && line.startsWith(o.labelType)){
+      flush(); cur = newQ(); cur.type = line.slice(o.labelType.length).trim(); mode='meta'; sawBlank=false; continue;
+    }
+    // заголовки тем по числу звёзд: «*» Секция 1, «**» Секция 2, «***» Секция 3
+    if (line[0] === '*'){
+      const level = line.match(/^\*+/)[0].length;
+      const name = cleanHeading(line);
+      flush();
+      if (level <= 1){ theme = name; sub=''; sub2=''; }
+      else if (level === 2){ sub = name; sub2=''; }
+      else { sub2 = name; }
+      mode='none'; sawBlank=false; continue;
+    }
+
+    // служебные строки-разделители (напр. «Задание #3/1037») — не текст и не ответ,
+    // считаются границей между вопросами
+    if (o.sepRe && o.sepRe.test(line)){ flush(); mode='none'; sawBlank=false; continue; }
+
+    // метаданные текущего вопроса (Статус/Балл/Код/Пояснение)
+    if (cur && mode !== 'done'){
+      if (startsAny(line, o.skip)){ sawBlank=false; continue; }
+      const cl = (o.codeLabels||[]).find(p => line.startsWith(p));
+      if (cl){ cur.code = line.slice(cl.length).trim(); sawBlank=false; continue; }
+      if (o.expl && line.startsWith(o.expl)){ mode='done'; sawBlank=false; continue; }
+    }
+
+    // ответы.
+    // ПРАВИЛО: знаки «+»/«-» считаются маркером ответа ТОЛЬКО если стоят в начале строки
+    // (первый символ). Такие же знаки в середине текста ответом не являются
+    // (например, дефис в «85% - каждые 2 часа» или «техником-лаборант»).
+    const first = line[0];
+    const isC = o.correct.includes(first), isW = o.wrong.includes(first);
+    if (isC || isW){
+      if (!cur) cur = newQ();                                   // вопрос без типа/текста — сразу ответы
+      cur.answers.push({ text:line.slice(1).trim(), correct:isC });
+      mode='answers'; sawBlank=false; continue;
+    }
+
+    // строка без маркера
+    if (mode === 'answers'){
+      if (sawBlank){                                            // пустая строка после ответов → новый вопрос
+        flush(); cur = newQ(); cur.textLines.push(line); mode='text';
+      } else if (cur.answers.length){                           // иначе — перенос длинного варианта ответа
+        const i = cur.answers.length-1;
+        cur.answers[i].text = (cur.answers[i].text + ' ' + line).trim();
+      }
+      sawBlank=false; continue;
+    }
+    if (mode === 'done'){
+      if (sawBlank){ flush(); cur = newQ(); cur.textLines.push(line); mode='text'; }  // новый вопрос после пояснения
+      sawBlank=false; continue;
+    }
+    // текст вопроса (в т.ч. строки-подсказки), в т.ч. для вопроса без «Тип:»
+    if (!cur) cur = newQ();
+    cur.textLines.push(line); mode='text'; sawBlank=false;
+  }
+  flush();
+
+  // авто-определение типа, если он не указан в исходнике
+  for (const q of out){
+    if (!q.type){
+      const nCorrect = q.answers.filter(a=>a.correct).length;
+      q.type = (nCorrect > 1) ? 'множественный выбор' : 'единственный выбор';
+      q.autoType = true;
+    }
+  }
+  return out;
+}
+
+/* ====================== Формирование XLSX ====================== */
+const COL = n => { let s=''; n++; while(n>0){ n--; s=String.fromCharCode(65+n%26)+s; n=Math.floor(n/26); } return s; };
+
+function transformType(t, o){
+  let v = t;
+  if (o.lower) v = v.toLocaleLowerCase('ru-RU');
+  if (o.norm){ if (v==='множественный') v='множественный выбор'; else if (v==='единственный') v='единственный выбор'; }
+  return v;
+}
+function keyword(correct, fmt){
+  if (fmt==='symbols') return correct?'+':'−';
+  if (fmt==='binary')  return correct?'1':'0';
+  return correct?'правильный':'неправильный';
+}
+function valueFor(field, q, i, o){
+  switch(field){
+    case 'type':     return i===0 ? transformType(q.type, o) : '';
+    case 'code':     return i===0 ? q.code : '';
+    case 'text':     return i===0 ? q.textLines.join('\n') : '';
+    case 'theme':    return i===0 ? q.theme : '';
+    case 'subtheme': return i===0 ? q.sub : '';
+    case 'subtheme2': return i===0 ? (q.sub2||'') : '';
+    case 'answers':  return (i < q.answers.length) ? q.answers[i].text : '';
+    case 'keys':     return (i < q.answers.length) ? keyword(q.answers[i].correct, o.keyFmt) : '';
+    case 'correct':  {
+      if (i!==0) return '';
+      const cs = q.answers.filter(x=>x.correct);
+      // первый верный — без знака; остальные верные — с новой строки со знаком «+» (без пробела)
+      return cs.map((a,idx)=> idx===0 ? a.text : '+' + a.text).join('\n');
+    }
+    case 'wrong1': case 'wrong2': case 'wrong3': case 'wrong4': {
+      if (i!==0) return '';
+      const n = parseInt(field.slice(5),10) - 1;
+      const w = q.answers.filter(x=>!x.correct);
+      return w[n] ? w[n].text : '';
+    }
+    default:         return '';
+  }
+}
+// Возвращает массив строк-объектов: каждая строка = массив значений по столбцам
+function buildRows(questions, columns, mapping, o){
+  const perAnswer = columns.some((_,ci) => mapping[ci]==='answers' || mapping[ci]==='keys');
+  const rows = [];
+  for (const q of questions){
+    const n = perAnswer ? Math.max(1, q.answers.length) : 1;
+    for (let i=0;i<n;i++){
+      const row = columns.map((_,ci) => valueFor(mapping[ci], q, i, o));
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+function cellXml(ref, text, styleAttr){
+  return `<c r="${ref}"${styleAttr||''} t="inlineStr"><is><t xml:space="preserve">${esc(text)}</t></is></c>`;
+}
+function sheetXml(columns, dataRows){
+  const lastCol = COL(columns.length-1);
+  const lastRow = dataRows.length + 1;
+  let body = '<row r="1" spans="1:'+columns.length+'">';
+  columns.forEach((c,ci) => body += cellXml(COL(ci)+'1', c, ' s="1"'));
+  body += '</row>';
+  dataRows.forEach((row, ri) => {
+    const r = ri + 2;
+    let cells = '';
+    row.forEach((val, ci) => { if (val !== '' && val != null) cells += cellXml(COL(ci)+r, val); });
+    body += `<row r="${r}" spans="1:${columns.length}">${cells}</row>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+    + `<dimension ref="A1:${lastCol}${lastRow}"/>`
+    + `<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>`
+    + `<sheetFormatPr defaultRowHeight="15"/>`
+    + `<cols><col min="1" max="${columns.length}" width="28" customWidth="1"/></cols>`
+    + `<sheetData>${body}</sheetData>`
+    + `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`
+    + `</worksheet>`;
+}
+function buildXlsxBlob(columns, dataRows, sheetName){
+  const enc = new TextEncoder();
+  const F = (name, str) => ({name, data: enc.encode(str)});
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
+    + `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
+    + `<Default Extension="xml" ContentType="application/xml"/>`
+    + `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`
+    + `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+    + `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`
+    + `</Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+    + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>`
+    + `</Relationships>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
+    + `<sheets><sheet name="${esc(sheetName||'Лист1')}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+  const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+    + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`
+    + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`
+    + `</Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+    + `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>`
+    + `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>`
+    + `<borders count="1"><border/></borders>`
+    + `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
+    + `<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`
+    + `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>`
+    + `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const files = [
+    F('[Content_Types].xml', contentTypes),
+    F('_rels/.rels', rels),
+    F('xl/workbook.xml', workbook),
+    F('xl/_rels/workbook.xml.rels', wbRels),
+    F('xl/styles.xml', styles),
+    F('xl/worksheets/sheet1.xml', sheetXml(columns, dataRows))
+  ];
+  return makeZip(files);
+}
+
+/* ====================== Сборка .docx в формате SE ====================== */
+// Встроенный шаблон «SE ПУСТОЙ Шаблон импорта тестовых заданий.docx» (base64).
+const SE_TEMPLATE_B64 = "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";
+// тип вопроса в виде SE (с заглавной), независимо от настройки нижнего регистра
+function seType(t){
+  t = (t||'').trim();
+  if (!t) return '';
+  const low = t.toLowerCase();
+  if (low==='единственный' || low==='единственный выбор') return 'Единственный выбор';
+  if (low==='множественный' || low==='множественный выбор') return 'Множественный выбор';
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function base64ToBytes(b64){
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+// один абзац Word; многострочный текст разбивается на <w:br/>; цвет и стиль абзаца опциональны
+function docxPara(text, colorHex, pStyle){
+  const pPr = pStyle ? `<w:pPr><w:pStyle w:val="${pStyle}"/></w:pPr>` : '';
+  const rpr = colorHex ? `<w:rPr><w:color w:val="${colorHex}"/></w:rPr>` : '';
+  const parts = String(text==null?'':text).split('\n');
+  let runs = '';
+  parts.forEach((p,i)=>{
+    if (i>0) runs += `<w:r>${rpr}<w:br/></w:r>`;
+    runs += `<w:r>${rpr}<w:t xml:space="preserve">${esc(p)}</w:t></w:r>`;
+  });
+  return `<w:p>${pPr}${runs}</w:p>`;
+}
+// собирает .docx НА ОСНОВЕ встроенного шаблона SE: сохраняет все его части
+// (стили, заголовок, шрифты, разметку), заменяя только тело документа.
+async function buildSeDocxBlob(questions, o){
+  const ORANGE='FFC000', BLUE='0070C0';
+  const tplBytes = base64ToBytes(SE_TEMPLATE_B64);
+  const dec = new TextDecoder('utf-8');
+  const docXml = dec.decode(await readZipEntry(tplBytes, 'word/document.xml'));
+  const headM  = docXml.match(/^[\s\S]*?<w:body[^>]*>/);
+  const head   = headM ? headM[0] : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>';
+  const titleM = docXml.match(/<w:p\b[\s\S]*?<\/w:p>/);   // первый абзац шаблона = заголовок-титул
+  const title  = titleM ? titleM[0] : '';
+  const sectM  = docXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/g);
+  const sect   = sectM ? sectM[sectM.length-1] : '';
+
+  let body = title;
+  let lastTheme = null, lastSub = null, lastSub2 = null;
+  for (const q of questions){
+    if (q.theme && q.theme !== lastTheme){ body += docxPara('* ' + q.theme, null, '2'); lastTheme = q.theme; lastSub = null; lastSub2 = null; }
+    if (q.sub   && q.sub   !== lastSub){   body += docxPara('** ' + q.sub, null, '3'); lastSub = q.sub; lastSub2 = null; }
+    if (q.sub2  && q.sub2  !== lastSub2){  body += docxPara('*** ' + q.sub2, null, '3'); lastSub2 = q.sub2; }
+    body += docxPara('Тип: ' + seType(q.type), ORANGE);                 // обязательно (из источника или авто)
+    body += docxPara('Статус: Нормальное', ORANGE);                     // всегда
+    body += docxPara('Балл: ' + (q.score || '1'), BLUE);                // всегда, по умолчанию 1
+    if (q.code) body += docxPara('Код задания: ' + q.code, BLUE);       // только при наличии кода
+    const text = (q.textLines||[]).join('\n');                          // текст вопроса сразу за Балл/Код
+    if (text) body += docxPara(text, null);
+    for (const a of q.answers) body += docxPara((a.correct ? '+ ' : '− ') + stripLeadingMarker(a.text), null);
+    body += '<w:p/>';                                                   // пустая строка между вопросами
+  }
+  const newDoc = head + body + sect + '</w:body></w:document>';
+
+  // пересобираем пакет шаблона, подменив только word/document.xml
+  const enc = new TextEncoder();
+  const files = [];
+  for (const name of listZipEntries(tplBytes).map(e=>e.name)){
+    files.push({ name, data: (name === 'word/document.xml') ? enc.encode(newDoc) : await readZipEntry(tplBytes, name) });
+  }
+  return makeZip(files);
+}
+
+/* ====================== Чтение текста из .xlsx-исходника ====================== */
+async function readXlsxSharedStrings(bytes){
+  const dec = new TextDecoder('utf-8');
+  try {
+    const ss = dec.decode(await readZipEntry(bytes, 'xl/sharedStrings.xml'));
+    return [...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(si =>
+      [...si[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>decodeXmlText(x[1])).join(''));
+  } catch(e){ return []; }
+}
+// разбирает ячейки одной строки в массив по индексу столбца.
+// КОРРЕКТНО обрабатывает самозакрытые пустые ячейки <c .../> (иначе значение «уезжает» в соседний столбец).
+function parseRowCells(inner, shared){
+  const out = [];
+  const re = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  let m;
+  while ((m = re.exec(inner))){
+    const rm = m[1].match(/r="([A-Z]+)\d+"/);
+    if (!rm) continue;
+    let n = 0; for (const ch of rm[1]) n = n*26 + (ch.charCodeAt(0)-64);
+    const ci = n - 1, attrs = m[1], body = m[2];
+    let val = '';
+    if (body !== undefined){
+      if (/t="s"/.test(attrs)){ const v = body.match(/<v>([\s\S]*?)<\/v>/); if (v) val = shared[parseInt(v[1],10)] || ''; }
+      else if (/t="inlineStr"/.test(attrs)){ val = [...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>decodeXmlText(x[1])).join(''); }
+      else { const v = body.match(/<v>([\s\S]*?)<\/v>/); if (v) val = decodeXmlText(v[1]); }
+    }
+    out[ci] = val;
+  }
+  for (let i=0;i<out.length;i++) if (out[i]==null) out[i]='';
+  return out;
+}
+// превращает книгу Excel в строки текста для того же парсера, что и Word.
+// ячейки одной строки склеиваются через пробел, перенос строки внутри ячейки -> новая строка.
+async function readXlsxText(bytes){
+  const dec = new TextDecoder('utf-8');
+  const shared = await readXlsxSharedStrings(bytes);
+  const sheets = listZipEntries(bytes).map(e=>e.name)
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a,b)=> (parseInt(a.match(/(\d+)/)[1]) - parseInt(b.match(/(\d+)/)[1])));
+  const lines = [];
+  for (const name of sheets){
+    const sheet = dec.decode(await readZipEntry(bytes, name));
+    for (const rowM of sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)){
+      const rowText = parseRowCells(rowM[1], shared).join(' ').replace(/\s+$/,'');
+      for (const part of rowText.split('\n')) lines.push(part);
+    }
+  }
+  return lines;
+}
+
+// читает книгу как сетку: { headers:[...], rows:[[c0,c1,...], ...] } по индексам столбцов
+async function readXlsxGrid(bytes){
+  const dec = new TextDecoder('utf-8');
+  const shared = await readXlsxSharedStrings(bytes);
+  const sheets = listZipEntries(bytes).map(e=>e.name)
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a,b)=> (parseInt(a.match(/(\d+)/)[1]) - parseInt(b.match(/(\d+)/)[1])));
+  if (!sheets.length) return { headers:[], rows:[] };
+  const sheet = dec.decode(await readZipEntry(bytes, sheets[0]));
+  const rowsOut = [];
+  for (const rowM of sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)){
+    rowsOut.push(parseRowCells(rowM[1], shared));
+  }
+  return { headers: rowsOut.length ? rowsOut[0] : [], rows: rowsOut.slice(1) };
+}
+
+// роли импорта: какие данные исходника-таблицы за что отвечают
+const IMPORT_ROLES = [
+  {id:'text',     label:'Текст вопроса'},
+  {id:'type',     label:'Тип вопроса'},
+  {id:'code',     label:'Код задания / вопроса'},
+  {id:'correct',  label:'Правильный ответ (+)'},
+  {id:'wrong1',   label:'Неправильный ответ 1 (−)'},
+  {id:'wrong2',   label:'Неправильный ответ 2 (−)'},
+  {id:'wrong3',   label:'Неправильный ответ 3 (−)'},
+  {id:'wrong4',   label:'Неправильный ответ 4 (−)'},
+  {id:'variants', label:'Варианты ответов (стопкой)'},
+  {id:'keys',     label:'Ключи (правильный/неправильный)'},
+  {id:'theme1',   label:'Тема — уровень 1 (*)'},
+  {id:'theme2',   label:'Тема — уровень 2 (**)'},
+  {id:'theme3',   label:'Тема — уровень 3 (***)'}
+];
+// определяет, какие столбцы за что отвечают (или null, если это не таблица вопросов)
+function detectSourceColumns(headers){
+  const H = headers.map(h => (h||'').toLowerCase());
+  const find = (...pats) => { for (let i=0;i<H.length;i++) if (pats.some(p=>H[i].includes(p))) return i; return -1; };
+  const findExcept = (exclude, ...pats) => { for (let i=0;i<H.length;i++){ if (exclude.includes(i)) continue; if (pats.some(p=>H[i].includes(p))) return i; } return -1; };
+  const findBoth = (a,b) => { for (let i=0;i<H.length;i++) if (H[i].includes(a) && H[i].includes(b)) return i; return -1; };
+  const variants = find('вариант');
+  const keys = find('ключ');
+  let type = find('тип вопрос'); if (type < 0) type = find('тип');   // «Тип вопроса» приоритетнее «Тип компетенции»
+  let code = find('код вопрос');
+  if (code < 0){ for (let i=0;i<H.length;i++) if (H[i].includes('код') && !H[i].includes('компетенц')){ code=i; break; } }
+  let correct = -1;
+  for (let i=0;i<H.length;i++) if (H[i].includes('правильн') && !H[i].includes('неправильн') && H[i].includes('ответ')){ correct=i; break; }
+  const wrong = [];
+  for (let i=0;i<H.length;i++) if (H[i].includes('неправильн') && H[i].includes('ответ')) wrong.push(i);
+  let text = find('текст');
+  if (text < 0) text = findExcept([type,code,variants,keys,correct,...wrong], 'вопрос');
+  let themeCols = [findBoth('секция 1','назв'), findBoth('секция 2','назв'), findBoth('секция 3','назв')].filter(i=>i>=0);
+  if (!themeCols.length){ for (let i=0;i<H.length;i++) if (H[i].includes('тема') && !H[i].includes('систем')) themeCols.push(i); }
+  themeCols = themeCols.slice(0,3);
+  if (variants < 0 && correct < 0) return null;  // не таблица вопросов — читать как текст
+  const at = i => (themeCols[i] != null) ? themeCols[i] : -1;
+  return { text, type, code, correct, variants, keys, wrong, theme:[at(0),at(1),at(2)] };
+}
+// карта ролей (для UI) <-> карта столбцов
+function cmToRoleMap(cm){
+  const g=(a,i)=>(a&&a[i]!=null)?a[i]:-1;
+  return { text:cm.text, type:cm.type, code:cm.code, correct:cm.correct, variants:cm.variants, keys:cm.keys,
+           wrong1:g(cm.wrong,0), wrong2:g(cm.wrong,1), wrong3:g(cm.wrong,2), wrong4:g(cm.wrong,3),
+           theme1:g(cm.theme,0), theme2:g(cm.theme,1), theme3:g(cm.theme,2) };
+}
+function roleMapToCm(rm){
+  const v=x=>(x==null?-1:x);
+  return { text:v(rm.text), type:v(rm.type), code:v(rm.code), correct:v(rm.correct), variants:v(rm.variants), keys:v(rm.keys),
+           wrong:[rm.wrong1,rm.wrong2,rm.wrong3,rm.wrong4].filter(i=>i>=0),
+           theme:[v(rm.theme1),v(rm.theme2),v(rm.theme3)] };
+}
+// строит вопросы из таблицы по карте столбцов cm
+function buildQuestionsFromGrid(grid, cm, o){
+  const cell = (r,ci) => (ci!=null && ci>=0) ? (r[ci]||'').trim() : '';
+  const keyCorrect = k => /^(прав|верн|\+|1$|да)/.test((k||'').trim().toLowerCase());
+  const autoType = out => { for (const q of out){ if (!q.type){ const nc=q.answers.filter(x=>x.correct).length; q.type = nc>1 ? 'множественный выбор' : 'единственный выбор'; q.autoType=true; } } return out; };
+  const mkThemes = r => ({ theme:cell(r,(cm.theme||[])[0]), sub:cell(r,(cm.theme||[])[1]), sub2:cell(r,(cm.theme||[])[2]) });
+  const hasVariants = (cm.variants!=null && cm.variants>=0);
+  const hasCorrect  = (cm.correct!=null && cm.correct>=0);
+
+  // ---- ШИРОКАЯ раскладка: один вопрос = одна строка ----
+  if (!hasVariants && hasCorrect){
+    const out = [];
+    for (const r of grid.rows){
+      const text = cell(r,cm.text);
+      const answers = [];
+      const pushAns = (t, correct) => String(t||'').split('\n').map(stripLeadingMarker).filter(Boolean).forEach(x=>answers.push({ text:x, correct }));
+      pushAns(cell(r,cm.correct), true);
+      (cm.wrong||[]).forEach(ci => pushAns(cell(r,ci), false));
+      if (!answers.length && !text) continue;
+      out.push(Object.assign({ type:cell(r,cm.type), code:cell(r,cm.code), textLines: text?[text]:[], answers }, mkThemes(r)));
+    }
+    return autoType(out);
+  }
+  // ---- СТОПОЧНАЯ раскладка: «Варианты ответов» (+ «Ключи») ----
+  if (!hasVariants) return [];
+  let tot=0, varFilled=0;
+  for (const r of grid.rows){ const a=cell(r,cm.text),v=cell(r,cm.variants),k=cell(r,cm.keys); if (a||v||k){ tot++; if (v) varFilled++; } }
+  const sparse = varFilled < tot * 0.9;
+  const out = []; let cur = null;
+  const flush = () => { if (cur && cur.answers.length) out.push(cur); cur = null; };
+  const newQ = r => Object.assign({ type:cell(r,cm.type), code:cell(r,cm.code), textLines:[], answers:[] }, mkThemes(r));
+  for (const r of grid.rows){
+    const a=cell(r,cm.text), v=cell(r,cm.variants), k=cell(r,cm.keys);
+    if (!a && !v && !k) continue;
+    if (sparse){
+      if (v){ flush(); cur = newQ(r); if (a) cur.textLines.push(a); cur.answers.push({ text:stripLeadingMarker(v), correct:keyCorrect(k) }); }
+      else if (cur){ cur.answers.push({ text:stripLeadingMarker(a), correct:keyCorrect(k) }); }
+    } else {
+      if (a){ flush(); cur = newQ(r); cur.textLines.push(a); if (v) cur.answers.push({ text:stripLeadingMarker(v), correct:keyCorrect(k) }); }
+      else if (cur && v){ cur.answers.push({ text:stripLeadingMarker(v), correct:keyCorrect(k) }); }
+    }
+  }
+  flush();
+  return autoType(out);
+}
+// обёртка с авто-определением столбцов (если карта не задана)
+function columnTableToQuestions(grid, o){
+  const cm = detectSourceColumns(grid.headers);
+  if (!cm) return null;
+  return buildQuestionsFromGrid(grid, cm, o);
+}
+
+/* ====================== Чтение столбцов из .xlsx-шаблона ====================== */
+async function readXlsxColumns(bytes){
+  const dec = new TextDecoder('utf-8');
+  const sheet = dec.decode(await readZipEntry(bytes, 'xl/worksheets/sheet1.xml'));
+  const shared = await readXlsxSharedStrings(bytes);
+  const row1m = sheet.match(/<row[^>]*r="1"[^>]*>([\s\S]*?)<\/row>/);
+  if (!row1m) throw new Error('В шаблоне не найдена строка заголовков.');
+  const cols = parseRowCells(row1m[1], shared);
+  // обрезаем хвостовые пустые
+  while (cols.length && cols[cols.length-1]==='') cols.pop();
+  return cols;
+}
+
+/* ====================== Автосопоставление столбцов ====================== */
+function guessMapping(columns){
+  const map = {};
+  columns.forEach((c, i) => {
+    const l = c.toLowerCase();
+    if (/^тип/.test(l)) map[i]='type';
+    else if (/код/.test(l) && /вопрос/.test(l)) map[i]='code';
+    else if (/неправильн/.test(l) && /ответ/.test(l)) map[i]='wrong'+((l.match(/(\d+)/)||[])[1]||'1');
+    else if (/правильн/.test(l) && /ответ/.test(l)) map[i]='correct';
+    else if (/ключ/.test(l)) map[i]='keys';
+    else if (/вариант/.test(l)) map[i]='answers';
+    else if (/^вопрос$|текст/.test(l)) map[i]='text';
+    else if (/секция\s*1.*назв/.test(l)) map[i]='theme';
+    else if (/секция\s*2.*назв/.test(l)) map[i]='subtheme';
+    else map[i]='';
+  });
+  return map;
+}
+
+/* ====================== Рендер таблицы соответствия ====================== */
+function renderMapping(){
+  const tb = $('mapTable').querySelector('tbody');
+  const thText = $('mapTable').querySelector('thead th:last-child');
+  let rows = '';
+
+  // ---- СЕКЦИЯ ИМПОРТА: источник-таблица (Excel) → какой столбец за что отвечает ----
+  if (state.srcKind === 'table' && state.srcColumns){
+    if (thText) thText.textContent = 'Столбец исходника';
+    const colSelect = (role) => {
+      const cur = (state.srcMap && state.srcMap[role]!=null) ? state.srcMap[role] : -1;
+      let opts = `<option value="-1"${cur==-1?' selected':''}>— не заполнять —</option>`;
+      state.srcColumns.forEach((c,i)=>{ opts += `<option value="${i}"${cur==i?' selected':''}>${esc(c||('Столбец '+(i+1)))}</option>`; });
+      return `<select data-role="${role}" style="width:100%">${opts}</select>`;
+    };
+    const title = (state.tplKind==='docx')
+      ? 'Параметр шаблона SE (.docx) — какой столбец исходника содержит эти данные'
+      : 'Параметр — какой столбец исходника содержит эти данные';
+    rows += `<tr><td colspan="2" style="background:#eef2f6;font-weight:600">${title}</td></tr>`;
+    for (const role of IMPORT_ROLES) rows += `<tr><td>${esc(role.label)}</td><td>${colSelect(role.id)}</td></tr>`;
+  }
+
+  // ---- СЕКЦИЯ ВЫВОДА ----
+  if (state.tplKind === 'docx'){
+    if (state.srcKind !== 'table')
+      rows += '<tr><td colspan="2" class="muted">Выгрузка .docx в формате SE (Тип / Статус: Нормальное / Балл: 1 / при наличии — Код задания / текст / варианты + / −). Для текстового исходника (Word) сопоставление не требуется.</td></tr>';
+  } else {
+    if (thText) thText.textContent = 'Данные из исходника';
+    rows += '<tr><td colspan="2" style="background:#eef2f6;font-weight:600">Столбец шаблона — какие данные туда записать</td></tr>';
+    state.columns.forEach((col, ci) => {
+      const sel = SOURCE_FIELDS.map(f => `<option value="${f.id}" ${state.mapping[ci]===f.id?'selected':''}>${esc(f.label)}</option>`).join('');
+      rows += `<tr><td>${esc(col)}</td><td><select data-ci="${ci}" style="width:100%">${sel}</select></td></tr>`;
+    });
+  }
+
+  tb.innerHTML = rows;
+  // импорт: смена столбца источника → пересобрать вопросы
+  tb.querySelectorAll('select[data-role]').forEach(s => s.addEventListener('change', e => {
+    state.srcMap[e.target.dataset.role] = parseInt(e.target.value, 10);
+    reparseSource();
+  }));
+  // вывод: смена поля для столбца шаблона
+  tb.querySelectorAll('select[data-ci]').forEach(s =>
+    s.addEventListener('change', e => { state.mapping[+e.target.dataset.ci] = e.target.value; }));
+}
+
+/* ====================== Предпросмотр ====================== */
+function renderPreview(columns, rows){
+  const maxR = Math.min(rows.length, 12);
+  let html = '<thead><tr>' + columns.map(c=>`<th>${esc(c)}</th>`).join('') + '</tr></thead><tbody>';
+  for (let i=0;i<maxR;i++) html += '<tr>' + rows[i].map(v=>`<td>${esc((v||'').replace(/\n/g,' ⏎ '))}</td>`).join('') + '</tr>';
+  html += '</tbody>';
+  $('previewTable').innerHTML = html;
+  $('previewWrap').style.display = '';
+}
+
+/* ====================== Чтение файла как Uint8Array ====================== */
+function fileToBytes(file){
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(new Uint8Array(r.result));
+    r.onerror = () => rej(r.error);
+    r.readAsArrayBuffer(file);
+  });
+}
+
+/* ====================== Разбор исходника ====================== */
+async function reparseSource(){
+  if (!state.srcBytes) return;
+  try {
+    const o = getOpts();
+    if (state.srcType === 'xlsx'){
+      // 1) пробуем как таблицу с шапкой
+      const grid = await readXlsxGrid(state.srcBytes);
+      const auto = detectSourceColumns(grid.headers);
+      if (auto){
+        state.srcKind = 'table';
+        state.srcColumns = grid.headers;
+        state.srcGrid = grid;
+        if (!state.srcMapValid){ state.srcMap = cmToRoleMap(auto); state.srcMapValid = true; }  // авто-карта при новом файле
+        state.questions = buildQuestionsFromGrid(grid, roleMapToCm(state.srcMap), o);
+      } else {
+        // 2) иначе читаем ячейки как текст в SE-формате
+        state.srcKind = 'text'; state.srcColumns = null; state.srcGrid = null;
+        state.questions = parseQuestions(await readXlsxText(state.srcBytes), o);
+      }
+    } else {
+      state.srcKind = 'text'; state.srcColumns = null; state.srcGrid = null;
+      const dec = new TextDecoder('utf-8');
+      const xml = dec.decode(await readZipEntry(state.srcBytes, 'word/document.xml'));
+      state.questions = parseQuestions(extractParagraphs(xml), o);
+    }
+    // литеральный «<br>» в тексте/ответах -> перенос строки
+    for (const q of (state.questions||[])){
+      q.textLines = (q.textLines||[]).map(normalizeBr);
+      for (const a of (q.answers||[])) a.text = normalizeBr(a.text);
+    }
+    const nAns = state.questions.reduce((s,q)=>s+q.answers.length,0);
+    const nAuto = state.questions.filter(q=>q.autoType).length;
+    setStatus($('srcStatus'),'ok', `Разобрано вопросов: <b>${state.questions.length}</b>, вариантов ответов: <b>${nAns}</b>`
+      + (nAuto ? `, тип определён автоматически: <b>${nAuto}</b>` : '') + '.');
+    $('convertBtn').disabled = state.questions.length===0;
+  } catch(e){
+    setStatus($('srcStatus'),'err', 'Не удалось прочитать исходник: '+esc(e.message));
+    state.questions = null; $('convertBtn').disabled = true;
+  }
+}
+
+/* ====================== События ====================== */
+$('srcFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  setStatus($('srcStatus'),'info','Читаю файл…');
+  state.srcBytes = await fileToBytes(f);
+  state.srcType = /\.xlsx$/i.test(f.name) ? 'xlsx' : 'docx';
+  state.srcName = f.name.replace(/\.(docx|xlsx)$/i,'');
+  state.srcMapValid = false;            // новый файл → пересобрать авто-карту
+  await reparseSource();
+  renderMapping();                      // обновить вкладку соответствия под новый источник
+});
+
+$('reparseBtn').addEventListener('click', reparseSource);
+
+$('toggleAdvanced').addEventListener('click', () => {
+  const p = $('advancedPanel');
+  const show = p.style.display === 'none';
+  p.style.display = show ? '' : 'none';
+  $('toggleAdvanced').textContent = show ? '▲ Скрыть настройку соответствия' : '⚙ Настроить соответствие столбцов';
+});
+
+function setConvertLabel(){
+  $('convertBtn').textContent = 'Конвертировать и скачать .' + (state.tplKind==='docx' ? 'docx' : 'xlsx');
+}
+function loadBuiltin(key){
+  const t = TEMPLATES[key];
+  $('tplFileWrap').style.display = 'none';
+  state.tplKind = t.kind || 'xlsx';
+  state.columns = t.columns.slice();
+  state.mapping = {};
+  state.columns.forEach((_,ci)=>{ state.mapping[ci] = (t.defaults[ci] || ''); });
+  state.tplName = t.name;
+  state.sheetName = t.sheetName;
+  renderMapping();
+  setConvertLabel();
+  if (state.tplKind === 'docx')
+    setStatus($('tplStatus'),'ok',`Выбран шаблон «${esc(t.name)}» — выгрузка в Word в формате SE.`);
+  else
+    setStatus($('tplStatus'),'ok',`Выбран встроенный шаблон «${esc(t.name)}» (${state.columns.length} столбцов).`);
+}
+
+$('tplSelect').addEventListener('change', e => {
+  if (e.target.value === 'custom'){
+    $('tplFileWrap').style.display = '';
+    setStatus($('tplStatus'),'info','Загрузите файл шаблона .xlsx, чтобы взять столбцы из его шапки.');
+  } else {
+    loadBuiltin(e.target.value);
+  }
+});
+
+$('tplFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    setStatus($('tplStatus'),'info','Читаю шаблон…');
+    const bytes = await fileToBytes(f);
+    const cols = await readXlsxColumns(bytes);
+    if (!cols.length) throw new Error('В первой строке шаблона нет заголовков столбцов.');
+    state.tplKind = 'xlsx';
+    state.columns = cols;
+    state.mapping = guessMapping(cols);
+    state.tplName = f.name.replace(/\.xlsx$/i,'');
+    state.sheetName = 'Лист1';
+    renderMapping();
+    setConvertLabel();
+    setStatus($('tplStatus'),'ok',`Из шаблона «${esc(f.name)}» взято столбцов: <b>${cols.length}</b>. Проверьте сопоставление ниже.`);
+  } catch(err){
+    setStatus($('tplStatus'),'err','Не удалось прочитать шаблон: '+esc(err.message));
+  }
+});
+
+function downloadBlob(blob, fname){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+$('convertBtn').addEventListener('click', async () => {
+  if (!state.questions || !state.questions.length){ setStatus($('convStatus'),'err','Сначала загрузите исходный файл.'); return; }
+  try {
+    const o = getOpts();
+    if (state.tplKind === 'docx'){
+      const blob = await buildSeDocxBlob(state.questions, o);
+      const fname = (state.srcName ? state.srcName+' — ' : '') + state.tplName + '.docx';
+      downloadBlob(blob, fname);
+      setStatus($('convStatus'),'ok',`Готово. Вопросов: <b>${state.questions.length}</b>. Файл «${esc(fname)}» скачан.`);
+      $('previewWrap').style.display = 'none';
+      return;
+    }
+    const rows = buildRows(state.questions, state.columns, state.mapping, o);
+    const blob = buildXlsxBlob(state.columns, rows, state.sheetName || 'Лист1');
+    const fname = (state.srcName ? state.srcName+' — ' : '') + state.tplName + '.xlsx';
+    downloadBlob(blob, fname);
+    setStatus($('convStatus'),'ok',`Готово. Строк данных: <b>${rows.length}</b>. Файл «${esc(fname)}» скачан.`);
+    renderPreview(state.columns, rows);
+  } catch(err){
+    setStatus($('convStatus'),'err','Ошибка при конвертации: '+esc(err.message));
+  }
+});
+
+/* ====================== Инициализация ====================== */
+(function init(){
+  loadBuiltin('gpn');
+  if (!('DecompressionStream' in window)){
+    setStatus($('srcStatus'),'err','Ваш браузер не поддерживает чтение .docx (нет DecompressionStream). Откройте файл в свежем Chrome, Edge или Firefox.');
+  }
+})();
+</script>
+</body>
+</html>
