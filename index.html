@@ -307,6 +307,7 @@ function makeZip(files){ // files: [{name, data:Uint8Array}]
 function decodeXmlText(s){
   return s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
           .replace(/&apos;/g,"'").replace(/&#10;/g,'\n').replace(/&#x?\d+;/g,'')
+          .replace(/_x000A_/g,'\n').replace(/_x000D_/g,'')
           .replace(/&amp;/g,'&');
 }
 function extractParagraphs(xml){
@@ -690,6 +691,7 @@ async function readXlsxGrid(bytes){
 
 // роли импорта: какие данные исходника-таблицы за что отвечают
 const IMPORT_ROLES = [
+  {id:'combined', label:'Вопрос + ответы в одной ячейке'},
   {id:'text',     label:'Текст вопроса'},
   {id:'type',     label:'Тип вопроса'},
   {id:'code',     label:'Код задания / вопроса'},
@@ -732,12 +734,14 @@ function detectSourceColumns(headers){
 function cmToRoleMap(cm){
   const g=(a,i)=>(a&&a[i]!=null)?a[i]:-1;
   return { text:cm.text, type:cm.type, code:cm.code, correct:cm.correct, variants:cm.variants, keys:cm.keys,
+           combined:(cm.combined!=null?cm.combined:-1),
            wrong1:g(cm.wrong,0), wrong2:g(cm.wrong,1), wrong3:g(cm.wrong,2), wrong4:g(cm.wrong,3),
            theme1:g(cm.theme,0), theme2:g(cm.theme,1), theme3:g(cm.theme,2) };
 }
 function roleMapToCm(rm){
   const v=x=>(x==null?-1:x);
   return { text:v(rm.text), type:v(rm.type), code:v(rm.code), correct:v(rm.correct), variants:v(rm.variants), keys:v(rm.keys),
+           combined:v(rm.combined),
            wrong:[rm.wrong1,rm.wrong2,rm.wrong3,rm.wrong4].filter(i=>i>=0),
            theme:[v(rm.theme1),v(rm.theme2),v(rm.theme3)] };
 }
@@ -791,6 +795,200 @@ function columnTableToQuestions(grid, o){
   const cm = detectSourceColumns(grid.headers);
   if (!cm) return null;
   return buildQuestionsFromGrid(grid, cm, o);
+}
+
+/* ============ Совмещённая ячейка: вопрос + ответы в одной клетке ============ */
+// Строка-вариант ответа начинается с маркера:
+//   • знак «+ / − / -» (плюс = верный, минус = неверный) — необязательный;
+//   • буквенная («А)», «Б.», «a)») или числовая («1)», «2.») метка + пробел.
+// После разбора маркер отбрасывается, остаётся тело ответа.
+const OPT_SIGN  = /^([+\-−–—])\s*/;
+const OPT_LABEL = /^(?:[A-Za-zА-Яа-яЁё]|\d{1,2})[)\.:\-–]\s+/;
+function matchOption(line){
+  const s = (line==null?'':String(line)).replace(/^\s+/,'');
+  if (!s) return null;
+  let sign = null, rest = s;
+  const m = s.match(OPT_SIGN);
+  if (m){ sign = m[1]; rest = s.slice(m[0].length); }
+  const lm = rest.match(OPT_LABEL);
+  if (lm){ return { body: rest.slice(lm[0].length).trim(), sign, labeled:true }; }
+  if (sign)  return { body: rest.trim(), sign, labeled:false };
+  return null;
+}
+// строки ячейки → { qLines:[текст вопроса], answers:[{text,correct}] }.
+// Всё до первого варианта — текст вопроса; пустые строки между вопросом и ответами игнорируются.
+// Первая непустая строка — всегда стем вопроса (даже если пронумерована «1.» — иначе номер примут за вариант).
+// Верный ответ = знак «+» ИЛИ жирная строка (при отсутствии знака). «−/-» = всегда неверный.
+function splitCombinedCell(lines){
+  const qLines = [], answers = [];
+  let started = false, firstSeen = false;
+  for (const ln of lines){
+    const t = (ln.text||'').trim();
+    if (!t) continue;                              // пустая строка — не разделитель, просто пропускаем
+    if (!firstSeen){ firstSeen = true; qLines.push(t); continue; }  // стем вопроса
+    const opt = matchOption(t);
+    if (opt){
+      started = true;
+      let correct;
+      if (opt.sign === '+') correct = true;
+      else if (opt.sign) correct = false;          // «−/-» — неверный
+      else correct = !!ln.bold;                    // без знака — по жирности
+      answers.push({ text: opt.body, correct });
+    } else if (!started){
+      qLines.push(t);                              // многострочный текст вопроса — до первого варианта
+    } else if (answers.length){
+      answers[answers.length-1].text = (answers[answers.length-1].text + ' ' + t).trim(); // перенос варианта
+    }
+  }
+  if (qLines.length) qLines[0] = qLines[0].replace(/^\s*\d{1,3}[.)]\s+/, ''); // убрать ведущий номер вопроса «1. »
+  return { qLines, answers };
+}
+// следующая по порядку метка варианта: c→d, 2→3, я→null
+const RU_SEQ='абвгдежзийклмнопрстуфхцчшщэюя', EN_SEQ='abcdefghijklmnopqrstuvwxyz';
+function successorLabel(lab){
+  if (/^\d+$/.test(lab)) return String(parseInt(lab,10)+1);
+  const c=lab.toLowerCase();
+  let i=EN_SEQ.indexOf(c); if (i>=0 && i<EN_SEQ.length-1) return EN_SEQ[i+1];
+  i=RU_SEQ.indexOf(c);     if (i>=0 && i<RU_SEQ.length-1) return RU_SEQ[i+1];
+  return null;
+}
+// метка варианта в начале строки → {label,len}; иначе null
+function leadingLabel(s){
+  const m=s.match(/^\s*(?:[+\-−–—]\s*)?([A-Za-zА-Яа-яЁё]|\d{1,2})[)\.:\-–]\s+/);
+  return m ? { label:m[1], len:m[0].length } : null;
+}
+// runs ячейки ([{text,bold}]) → строки {text,bold}. Делит по '\n' И по встроенной метке
+// следующего по порядку варианта (когда два варианта слиты в одну строку — пропущен перенос).
+// Первая непустая строка (стем вопроса) вторично не делится. «Жирная» = ≥50% непробельных символов жирные.
+function cellLinesToBold(runs){
+  let text=''; const bold=[];
+  for (const run of (runs||[])){ const s=String(run.text==null?'':run.text); for (let k=0;k<s.length;k++){ text+=s[k]; bold.push(!!run.bold); } }
+  const frac=(a,b)=>{ let c=0,bd=0; for (let i=a;i<b;i++){ if (/\s/.test(text[i])) continue; c++; if (bold[i]) bd++; } return c>0 && bd*2>=c; };
+  const raw=[]; let st=0;
+  for (let i=0;i<=text.length;i++){ if (i===text.length || text[i]==='\n'){ raw.push([st,i]); st=i+1; } }
+  const out=[]; let seenFirst=false;
+  for (const [a,b] of raw){
+    const hasContent = text.slice(a,b).trim().length>0;
+    if (hasContent && !seenFirst){ seenFirst=true; out.push({ text:text.slice(a,b), bold:frac(a,b) }); continue; } // стем вопроса — не дробим
+    let segStart=a, ll=leadingLabel(text.slice(segStart,b)), lab=ll?ll.label:null;
+    while (lab){
+      const succ=successorLabel(lab); if (!succ) break;
+      const from=segStart+(ll?ll.len:0);
+      const re=new RegExp('\\s('+succ.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')[)\\.:\\-–]\\s','i');
+      const mm=re.exec(text.slice(from,b)); if (!mm) break;
+      const cut=from+mm.index+1;                          // +1: ведущий пробел остаётся у предыдущего варианта
+      out.push({ text:text.slice(segStart,cut), bold:frac(segStart,cut) });
+      segStart=cut; ll=leadingLabel(text.slice(segStart,b)); lab=ll?ll.label:succ;
+    }
+    out.push({ text:text.slice(segStart,b), bold:frac(segStart,b) });
+  }
+  return out;
+}
+
+/* ---- Чтение .xlsx с сохранением жирного начертания (runs) ---- */
+function parseSiRuns(inner){
+  const runs = [];
+  if (/<r[\s>]/.test(inner)){
+    for (const rm of inner.matchAll(/<r\b[^>]*>([\s\S]*?)<\/r>/g)){
+      const body = rm[1];
+      const rprM = body.match(/<rPr>[\s\S]*?<\/rPr>/);
+      const rpr = rprM ? rprM[0] : '';
+      const bold = /<b\b[^>]*\/?>/.test(rpr) && !/<b\b[^>]*val="(?:0|false)"/.test(rpr);
+      const t = [...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>decodeXmlText(x[1])).join('');
+      runs.push({ text:t, bold });
+    }
+  } else {
+    const t = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>decodeXmlText(x[1])).join('');
+    runs.push({ text:t, bold:false });
+  }
+  return runs;
+}
+async function readXlsxSharedStringsRich(bytes){
+  const dec = new TextDecoder('utf-8');
+  try {
+    const ss = dec.decode(await readZipEntry(bytes, 'xl/sharedStrings.xml'));
+    return [...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(si => parseSiRuns(si[1]));
+  } catch(e){ return []; }
+}
+// разбирает ячейки строки в массив { text, runs } по индексу столбца
+function parseRowCellsRich(inner, sharedRich){
+  const out = [];
+  const re = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  let m;
+  while ((m = re.exec(inner))){
+    const rm = m[1].match(/r="([A-Z]+)\d+"/); if (!rm) continue;
+    let n=0; for (const ch of rm[1]) n = n*26 + (ch.charCodeAt(0)-64);
+    const ci = n-1, attrs = m[1], body = m[2];
+    let runs = [{text:'',bold:false}];
+    if (body !== undefined){
+      if (/t="s"/.test(attrs)){ const v = body.match(/<v>([\s\S]*?)<\/v>/); const idx = v?parseInt(v[1],10):-1; runs = sharedRich[idx] || [{text:'',bold:false}]; }
+      else if (/t="inlineStr"/.test(attrs)){ runs = parseSiRuns(body); }
+      else { const v = body.match(/<v>([\s\S]*?)<\/v>/); runs = [{text: v?decodeXmlText(v[1]):'', bold:false}]; }
+    }
+    out[ci] = { text: runs.map(r=>r.text).join(''), runs };
+  }
+  for (let i=0;i<out.length;i++) if (out[i]==null) out[i] = {text:'',runs:[{text:'',bold:false}]};
+  return out;
+}
+// { headers:[str], headerRow:[{text,runs}], rows:[[{text,runs}]] } по первому листу
+async function readXlsxRichGrid(bytes){
+  const dec = new TextDecoder('utf-8');
+  const sharedRich = await readXlsxSharedStringsRich(bytes);
+  const sheets = listZipEntries(bytes).map(e=>e.name)
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a,b)=> (parseInt(a.match(/(\d+)/)[1]) - parseInt(b.match(/(\d+)/)[1])));
+  if (!sheets.length) return { headers:[], headerRow:[], rows:[] };
+  const sheet = dec.decode(await readZipEntry(bytes, sheets[0]));
+  const rowsOut = [];
+  for (const rowM of sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) rowsOut.push(parseRowCellsRich(rowM[1], sharedRich));
+  const headerRow = rowsOut.length ? rowsOut[0] : [];
+  return { headers: headerRow.map(c=>c.text), headerRow, rows: rowsOut.slice(1) };
+}
+
+// ищет столбец, где ячейки содержат вопрос+ответы вместе (многострочные, ≥2 вариантов); -1 если нет
+function detectCombinedColumn(grid){
+  const nCols = grid.headers.length || (grid.rows[0] ? grid.rows[0].length : 0);
+  let best = -1, bestHits = 0;
+  for (let c=0;c<nCols;c++){
+    let hits = 0, nonEmpty = 0;
+    for (const r of grid.rows){
+      const cell = (r[c]||'').trim(); if (!cell) continue; nonEmpty++;
+      const lines = cell.split('\n').map(s=>s.trim()).filter(Boolean);
+      if (lines.length < 2) continue;
+      if (lines.filter(l=>matchOption(l)).length >= 2) hits++;
+    }
+    if (nonEmpty>0 && hits>bestHits && hits >= Math.max(1, nonEmpty*0.3)){ bestHits = hits; best = c; }
+  }
+  return best;
+}
+// вспомогательные столбцы (тип/код/тема) рядом с совмещённым — по заголовкам
+function detectAuxColumns(headers, exclude){
+  const H = headers.map(h => (h||'').toLowerCase());
+  const g = i => (i!=null ? i : -1);
+  const find = (...pats) => { for (let i=0;i<H.length;i++){ if (i===exclude) continue; if (pats.some(p=>H[i].includes(p))) return i; } return -1; };
+  let type = find('тип вопрос'); if (type<0) type = find('тип');
+  let code = -1; for (let i=0;i<H.length;i++){ if (i===exclude) continue; if (H[i].includes('код') && !H[i].includes('компетенц')){ code=i; break; } }
+  let theme = [];
+  for (const pr of [['секция 1','назв'],['секция 2','назв'],['секция 3','назв']]){ for (let i=0;i<H.length;i++){ if (H[i].includes(pr[0]) && H[i].includes(pr[1])){ theme.push(i); break; } } }
+  if (!theme.length){ for (let i=0;i<H.length;i++){ if (i===exclude) continue; if (H[i].includes('тема') && !H[i].includes('систем')) theme.push(i); } }
+  theme = theme.slice(0,3);
+  return { type, code, theme:[g(theme[0]), g(theme[1]), g(theme[2])] };
+}
+// строит вопросы из совмещённых ячеек (rows — массив рич-строк [{text,runs}])
+function buildQuestionsFromCombined(rows, cm, o){
+  const txt = (r,ci) => (ci!=null && ci>=0 && r[ci]) ? String(r[ci].text||'').trim() : '';
+  const out = [];
+  for (const r of rows){
+    const cell = r[cm.combined];
+    if (!cell || !String(cell.text||'').trim()) continue;
+    const runs = (cell.runs && cell.runs.length) ? cell.runs : [{text:cell.text, bold:false}];
+    const { qLines, answers } = splitCombinedCell(cellLinesToBold(runs));
+    if (!answers.length && !qLines.length) continue;
+    out.push({ type:txt(r,cm.type), code:txt(r,cm.code), textLines:qLines, answers,
+               theme:txt(r,(cm.theme||[])[0]), sub:txt(r,(cm.theme||[])[1]), sub2:txt(r,(cm.theme||[])[2]) });
+  }
+  for (const q of out){ if (!q.type){ const nc=q.answers.filter(a=>a.correct).length; q.type = nc>1?'множественный выбор':'единственный выбор'; q.autoType=true; } }
+  return out;
 }
 
 /* ====================== Чтение столбцов из .xlsx-шаблона ====================== */
@@ -897,18 +1095,39 @@ async function reparseSource(){
   try {
     const o = getOpts();
     if (state.srcType === 'xlsx'){
-      // 1) пробуем как таблицу с шапкой
+      // 1) пробуем как таблицу с шапкой; если нет — ищем «совмещённую» ячейку (вопрос+ответы вместе)
       const grid = await readXlsxGrid(state.srcBytes);
       const auto = detectSourceColumns(grid.headers);
-      if (auto){
+      const combinedCol = auto ? -1 : detectCombinedColumn(grid);
+      if (auto || combinedCol >= 0){
         state.srcKind = 'table';
         state.srcColumns = grid.headers;
         state.srcGrid = grid;
-        if (!state.srcMapValid){ state.srcMap = cmToRoleMap(auto); state.srcMapValid = true; }  // авто-карта при новом файле
-        state.questions = buildQuestionsFromGrid(grid, roleMapToCm(state.srcMap), o);
+        if (!state.srcMapValid){                                          // авто-карта при новом файле
+          if (auto){ state.srcMap = cmToRoleMap(auto); }
+          else {
+            const aux = detectAuxColumns(grid.headers, combinedCol);
+            state.srcMap = cmToRoleMap({ text:-1, type:aux.type, code:aux.code, correct:-1, variants:-1,
+                                         keys:-1, wrong:[], theme:aux.theme, combined:combinedCol });
+          }
+          state.srcMapValid = true;
+        }
+        const cm = roleMapToCm(state.srcMap);
+        if (cm.combined != null && cm.combined >= 0){                     // режим «вопрос+ответы в одной ячейке»
+          const gr = await readXlsxRichGrid(state.srcBytes);
+          const hc = gr.headerRow[cm.combined];
+          const headerIsData = hc && splitCombinedCell(cellLinesToBold(hc.runs)).answers.length >= 2; // нет шапки — первая строка тоже данные
+          const rows = headerIsData ? [gr.headerRow, ...gr.rows] : gr.rows;
+          state.questions = buildQuestionsFromCombined(rows, cm, o);
+          state.srcCombined = true;
+        } else {
+          state.questions = buildQuestionsFromGrid(grid, cm, o);
+          state.srcCombined = false;
+        }
       } else {
         // 2) иначе читаем ячейки как текст в SE-формате
         state.srcKind = 'text'; state.srcColumns = null; state.srcGrid = null;
+        state.srcCombined = false;
         state.questions = parseQuestions(await readXlsxText(state.srcBytes), o);
       }
     } else {
@@ -924,8 +1143,11 @@ async function reparseSource(){
     }
     const nAns = state.questions.reduce((s,q)=>s+q.answers.length,0);
     const nAuto = state.questions.filter(q=>q.autoType).length;
+    const nNoCorrect = state.questions.filter(q=>q.answers.length && !q.answers.some(a=>a.correct)).length;
     setStatus($('srcStatus'),'ok', `Разобрано вопросов: <b>${state.questions.length}</b>, вариантов ответов: <b>${nAns}</b>`
-      + (nAuto ? `, тип определён автоматически: <b>${nAuto}</b>` : '') + '.');
+      + (nAuto ? `, тип определён автоматически: <b>${nAuto}</b>` : '') + '.'
+      + (state.srcCombined ? ' Режим: <b>вопрос+ответы в одной ячейке</b> (верный — по «+» или жирному начертанию).' : '')
+      + (state.srcCombined && nNoCorrect ? ` <b style="color:#9a6700">Без верного ответа: ${nNoCorrect}</b> — проверьте «+»/жирный в исходнике.` : ''));
     $('convertBtn').disabled = state.questions.length===0;
   } catch(e){
     setStatus($('srcStatus'),'err', 'Не удалось прочитать исходник: '+esc(e.message));
