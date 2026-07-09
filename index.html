@@ -673,6 +673,21 @@ async function readXlsxText(bytes){
   return lines;
 }
 
+// Выбор строки-шапки: над таблицей может быть строка-баннер (напр. название процесса),
+// поэтому берём не первую строку, а ту из первых ~15, где больше всего заголовочных слов.
+const HEADER_TOKENS = ['вопрос','вариант','ответ','ключ','тип','код','текст','правильн','неправильн','тема','секц','п/п','источник','изображен','баллы','статус'];
+function pickHeaderRow(rowsOut){
+  let best = 0, bestScore = -1;
+  const lim = Math.min(rowsOut.length, 15);
+  for (let i=0;i<lim;i++){
+    const cells = rowsOut[i].map(c=>(c||'').toLowerCase());
+    if (cells.filter(Boolean).length < 2) continue;          // строка-баннер (одна ячейка) — пропускаем
+    let score = 0;
+    for (const c of cells) if (HEADER_TOKENS.some(t=>c.includes(t))) score++;
+    if (score > bestScore){ bestScore = score; best = i; }
+  }
+  return bestScore > 0 ? best : 0;
+}
 // читает книгу как сетку: { headers:[...], rows:[[c0,c1,...], ...] } по индексам столбцов
 async function readXlsxGrid(bytes){
   const dec = new TextDecoder('utf-8');
@@ -686,7 +701,9 @@ async function readXlsxGrid(bytes){
   for (const rowM of sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)){
     rowsOut.push(parseRowCells(rowM[1], shared));
   }
-  return { headers: rowsOut.length ? rowsOut[0] : [], rows: rowsOut.slice(1) };
+  if (!rowsOut.length) return { headers:[], rows:[] };
+  const hi = pickHeaderRow(rowsOut);
+  return { headers: rowsOut[hi], rows: rowsOut.slice(hi+1) };
 }
 
 // роли импорта: какие данные исходника-таблицы за что отвечают
@@ -713,7 +730,13 @@ function detectSourceColumns(headers){
   const findExcept = (exclude, ...pats) => { for (let i=0;i<H.length;i++){ if (exclude.includes(i)) continue; if (pats.some(p=>H[i].includes(p))) return i; } return -1; };
   const findBoth = (a,b) => { for (let i=0;i<H.length;i++) if (H[i].includes(a) && H[i].includes(b)) return i; return -1; };
   const variants = find('вариант');
-  const keys = find('ключ');
+  let keys = find('ключ');
+  // Столбец-метка при стопочной раскладке: заголовок «Ответ/Ответы/Верно» (в ячейке «х» = правильный,
+  // пусто = неправильный) — это тоже ключ. Только когда есть «Варианты», иначе «Ответ» — это текст ответа.
+  if (keys < 0 && variants >= 0){
+    for (let i=0;i<H.length;i++){ const h=H[i].trim();
+      if (i!==variants && (h==='ответ'||h==='ответы'||h==='верно'||h==='верный'||h==='ключ ответа')){ keys=i; break; } }
+  }
   let type = find('тип вопрос'); if (type < 0) type = find('тип');   // «Тип вопроса» приоритетнее «Тип компетенции»
   let code = find('код вопрос');
   if (code < 0){ for (let i=0;i<H.length;i++) if (H[i].includes('код') && !H[i].includes('компетенц')){ code=i; break; } }
@@ -748,8 +771,12 @@ function roleMapToCm(rm){
 // строит вопросы из таблицы по карте столбцов cm
 function buildQuestionsFromGrid(grid, cm, o){
   const cell = (r,ci) => (ci!=null && ci>=0) ? (r[ci]||'').trim() : '';
-  const keyCorrect = k => /^(прав|верн|\+|1$|да)/.test((k||'').trim().toLowerCase());
-  const autoType = out => { for (const q of out){ if (!q.type){ const nc=q.answers.filter(x=>x.correct).length; q.type = nc>1 ? 'множественный выбор' : 'единственный выбор'; q.autoType=true; } } return out; };
+  // Ключ «правильный ответ»: слова (правильный/верный/да), «+», либо метка-галочка «х/x/✓/✔/×».
+  // Пустая ячейка (или «неправильный/−/0») → неправильный ответ.
+  const keyCorrect = k => { const s=(k||'').trim().toLowerCase(); return /^(прав|верн|да|\+|х|x|✓|✔|✅|×)/.test(s) || s==='1'; };
+  // тип берём из исходника, только если это похоже на тип вопроса SE; иначе выводим по числу верных ответов
+  const isSeType = t => /выбор|открыт|соответств|сопоставл|последоват|порядок|ввод|числ|да\s*\/\s*нет|верно\s*\/\s*неверно/i.test(t||'');
+  const autoType = out => { for (const q of out){ if (!isSeType(q.type)){ const nc=q.answers.filter(x=>x.correct).length; q.type = nc>1 ? 'множественный выбор' : 'единственный выбор'; q.autoType=true; } } return out; };
   const mkThemes = r => ({ theme:cell(r,(cm.theme||[])[0]), sub:cell(r,(cm.theme||[])[1]), sub2:cell(r,(cm.theme||[])[2]) });
   const hasVariants = (cm.variants!=null && cm.variants>=0);
   const hasCorrect  = (cm.correct!=null && cm.correct>=0);
